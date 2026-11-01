@@ -1,0 +1,12 @@
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+*.egg-info/
+agent/build/
+web/node_modules/
+web/dist/
+dist/
+packaging/wheels/
+packaging/stage/
+*.deb

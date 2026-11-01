@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=X-Scanner
+Comment=Diagnóstico local para Linux
+Exec=/usr/bin/xscanner-launch
+Terminal=true
+Categories=Utility;System;
