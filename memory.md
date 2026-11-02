@@ -16,6 +16,9 @@
 - XDG paths hold local settings, history and reports; no personal data is sent to the hosting site.
 - Photo capture dates use EXIF or ffprobe when available; Pillow generates bounded thumbnails. NetHogs attribution is optional and requires polkit.
 - The first delivery is source, `.deb` build process and Netlify-ready static files. Publication and a second-machine compatibility test require those environments.
+- La vista de resultados tiene Cliente por defecto y Técnico JSON; las alertas de laboratorio usan únicamente evidencia medida.
+- La exploración de archivos usa HOME y carpetas XDG visibles del usuario; no presenta `/sys` o `/dev` como carpetas personales.
+- Arsenal permite editar solo scripts personales; los diagnósticos y acciones privilegiadas integrados permanecen fijos.
 
 ## Commands
 

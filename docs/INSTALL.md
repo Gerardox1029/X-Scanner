@@ -41,6 +41,12 @@ Inicia **X-Scanner** desde el menú de aplicaciones. La terminal muestra el cód
 
 Si otro proceso ya usa 8765, X-Scanner se cierra con un mensaje y no se conecta a ese proceso. El complemento no se instala como servicio de sistema ni escucha en la red local.
 
+### Volver a iniciar y obtener otro código
+
+Si la primera instancia sigue abierta, ciérrala con Ctrl-C en su terminal o desde el lanzador. Después ejecuta `xscanner-launch` otra vez. Si aparece “puerto 8765 ocupado”, identifica el proceso con `sudo fuser -v 8765/tcp`; detén únicamente una instancia identificada de X-Scanner y vuelve a lanzarlo. El código anterior es de un solo uso y vence a los diez minutos.
+
+En la web, el resultado aparece primero en modo Cliente. Cambia a “Técnico · JSON” para revisar mediciones completas. Herramientas del técnico incluye Arsenal para scripts personales guardados en `~/.local/share/xscanner/scripts/`.
+
 ## Datos y restauración
 
 - Configuración: `${XDG_CONFIG_HOME:-~/.config}/xscanner/settings.json`.

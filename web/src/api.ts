@@ -2,7 +2,7 @@ export const API = 'http://127.0.0.1:8765/api/v1'
 
 export type DiagnosticKind = 'storage-space' | 'storage-photo' | 'storage-file' | 'process-slow' | 'process-frozen' | 'process-heat' | 'network-offline' | 'network-slow' | 'network-page' | 'full-scan' | 'strange-case'
 export type Action = { kind: string; description: string }
-export type Result = { summary: string; measurements?: unknown[]; findings?: string[]; evidence?: unknown[]; limitations?: string[]; recommendations?: string[]; actions?: Action[] }
+export type Result = { summary: string; measurements?: unknown[]; findings?: string[]; evidence?: unknown[]; limitations?: string[]; recommendations?: string[]; actions?: Action[]; actions_taken?: unknown[] }
 export type Task = { id: string; kind: DiagnosticKind; params: Record<string, unknown>; status: string; progress: number; result: Result | null; error: string | null; created: string }
 export type Prepared = { token: string; kind: string; description: string; consequences: string; recovery: string }
 

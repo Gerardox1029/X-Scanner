@@ -296,6 +296,15 @@ def create_app() -> FastAPI:
         folder.mkdir(mode=0o700, exist_ok=True)
         return sorted(p.stem for p in folder.glob("*.py") if re.fullmatch(r"[a-zA-Z0-9_-]{1,40}", p.stem))
 
+    @app.get("/api/v1/technician/scripts/{name}", dependencies=[Depends(tech)])
+    def read_script(name: str):
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,40}", name):
+            raise HTTPException(400, "Nombre inválido")
+        path = DATA_DIR / "scripts" / f"{name}.py"
+        if not path.is_file():
+            raise HTTPException(404, "Script no encontrado")
+        return {"name": name, "category": "usuario", "source": path.read_text()}
+
     @app.post("/api/v1/technician/scripts", dependencies=[Depends(tech)])
     def save_script(body: ScriptInput):
         folder = DATA_DIR / "scripts"

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { download, localFetch, post, request, type DiagnosticKind, type Prepared, type Result, type Task } from './api'
 
 type Page = 'home' | 'storage' | 'process' | 'network' | 'labs' | 'history' | 'tech'
+type ResultView = 'client' | 'technical'
 type Item = { kind: DiagnosticKind; title: string; description: string; icon: string }
 type FileEvidence = { path?: string; name?: string; bytes?: number; modified?: string; captured?: string; date_used?: string; pid?: number; created?: number; status?: string; rss_bytes?: number }
 
@@ -94,6 +95,27 @@ function DataList({ title, data }: { title: string; data?: unknown[] }) {
   </div>)}</div></div>
 }
 
+function ClientResult({ task }: { task: Task }) {
+  const result = task.result
+  if (!result) return null
+  const findings = result.findings || []
+  const evidence = (result.evidence || []).filter((item): item is FileEvidence => typeof item === 'object' && item !== null && ('path' in item || 'name' in item))
+  const facts = (result.measurements || []).flatMap(item => {
+    if (!item || typeof item !== 'object') return []
+    return Object.entries(item as Record<string, unknown>)
+      .filter(([key]) => !key.endsWith('_bytes') && !['interfaces', 'default_route', 'dns_servers', 'temperatures_celsius'].includes(key))
+      .map(([key, value]) => `${key.replaceAll('_', ' ')}: ${typeof value === 'number' ? value.toFixed(2) : String(value)}`)
+  })
+  return <div className="client-result">
+    <div className="client-summary"><span className="client-icon">✓</span><div><strong>{findings.length ? 'Se encontraron señales para revisar' : 'No se encontraron señales críticas'}</strong><p>{result.summary}</p></div></div>
+    {findings.length > 0 && <div className="problem-alert" role="alert"><span aria-hidden="true">⚠</span><div><strong>Problema encontrado</strong><p>{findings[0]}</p></div></div>}
+    <MetricCards measurements={result.measurements} />
+    {facts.length > 0 && <div className="quick-facts"><h4>Lo más importante</h4>{facts.slice(0, 8).map((line, i) => <p key={i}>{line}</p>)}</div>}
+    {evidence.length > 0 && <div className="quick-facts"><h4>Elementos encontrados</h4>{evidence.slice(0, 8).map((item, i) => <p key={i}><strong>{item.name || item.path || item.pid || 'Elemento'}</strong>{item.bytes !== undefined ? ` · ${formatBytes(item.bytes)}` : item.rss_bytes !== undefined ? ` · RAM ${formatBytes(item.rss_bytes)}` : ''}</p>)}</div>}
+    {result.limitations?.length ? <p className="client-limitations">Límites del análisis: {result.limitations[0]}</p> : null}
+  </div>
+}
+
 function MetricCards({ measurements }: { measurements?: unknown[] }) {
   const volumes = (measurements || []).filter((x): x is { volume: string; percent: number; free_bytes: number } => typeof x === 'object' && x !== null && 'volume' in x && 'percent' in x)
   const cpu = (measurements || []).find((x): x is { cpu_percent_by_core: number[]; memory_available_bytes: number } => typeof x === 'object' && x !== null && 'cpu_percent_by_core' in x)
@@ -123,6 +145,9 @@ export default function App() {
   const [scriptName, setScriptName] = useState('')
   const [scriptSource, setScriptSource] = useState('print("Hola desde X-Scanner")')
   const [scriptOutput, setScriptOutput] = useState('')
+  const [resultView, setResultView] = useState<ResultView>('client')
+  const [actionState, setActionState] = useState<'idle' | 'working' | 'success'>('idle')
+  const [scripts, setScripts] = useState<string[]>([])
 
   async function checkHealth() {
     request<{ service: string; api_version: number }>('/health').then(r => {
@@ -170,6 +195,7 @@ export default function App() {
     setPrepared(null)
     setError('')
     setMessage('')
+    setResultView('client')
   }
 
   async function run(kind = selected, values = params) {
@@ -184,6 +210,7 @@ export default function App() {
       const response = await post<Task>('/tasks', token, { kind, params: submitted })
       setTask(response)
       setSelected(kind)
+      setResultView('client')
     } catch (e) { setError((e as Error).message) }
   }
 
@@ -209,11 +236,14 @@ export default function App() {
 
   async function executeAction() {
     if (!prepared || !token) return
+    setActionState('working')
     try {
       const response = await post<{ message: string }>('/actions/execute', token, { token: prepared.token })
+      await new Promise(resolve => window.setTimeout(resolve, 2000))
       setPrepared(null)
+      setActionState('success')
       setMessage(`${response.message}. Ejecuta de nuevo el diagnóstico para comparar.`)
-    } catch (e) { setError((e as Error).message); setPrepared(null) }
+    } catch (e) { setError((e as Error).message); setPrepared(null); setActionState('idle') }
   }
 
   async function lab(kind: string, operation: 'start' | 'restore') {
@@ -223,6 +253,11 @@ export default function App() {
       setLabs(await request<Record<string, unknown>>('/labs', token))
       setMessage(operation === 'start' ? 'Prueba creada. Ejecuta el diagnóstico correspondiente.' : 'Recursos de la prueba restaurados.')
     } catch (e) { setError((e as Error).message) }
+  }
+
+  async function loadScripts() {
+    if (!token || !techUnlocked) return
+    try { setScripts(await request<string[]>('/technician/scripts', token)) } catch (e) { setError((e as Error).message) }
   }
 
   const currentModule = page === 'storage' || page === 'process' || page === 'network' ? modules[page] : null
@@ -252,6 +287,7 @@ export default function App() {
           <div className="section-heading"><div><p className="eyebrow">EXPLORA POR ÁREA</p><h2>¿Qué necesitas revisar?</h2></div><span>03 módulos disponibles</span></div>
           <div className="module-grid">{(['storage', 'process', 'network'] as const).map((id, index) => <button className="module-card" key={id} onClick={() => setPage(id)}><div className="module-top"><span className="module-icon">{modules[id].icon}</span><span className="module-number">0{index + 1} / 03</span></div><h3>{modules[id].title}</h3><p>{modules[id].subtitle}</p><div className="module-footer"><span>3 diagnósticos</span><span className="arrow">↗</span></div></button>)}</div>
           <button className="scan-card" disabled={!token} onClick={() => { select('full-scan'); run('full-scan', {}) }}><div><p className="eyebrow">NO SABES POR DÓNDE EMPEZAR</p><h3>Algo anda mal, pero no sé por dónde comenzar</h3><p>Full Scan revisa el estado general de las tres áreas y te orienta sobre el siguiente paso.</p></div><span>INICIAR FULL SCAN ↗</span></button>
+          <section className="tech-card quick-start"><p className="eyebrow">GUÍA DE CONEXIÓN</p><h3>Instalar y volver a vincular</h3><p>Desde la carpeta donde descargaste el paquete: <code>sudo apt install ./xscanner-agent_0.1.0_amd64.deb</code></p><p>Configura el sitio publicado: <code>xscanner-cli origin https://xscanner.netlify.app</code>. Luego inicia <strong>X-Scanner</strong> desde el menú y escribe el código temporal.</p><p>Si ya estaba iniciado, cierra esa instancia y vuelve a ejecutar <code>xscanner-launch</code>. Si aparece “puerto 8765 ocupado”, comprueba el proceso con <code>sudo fuser -v 8765/tcp</code>; detén solo una instancia identificada de X-Scanner y vuelve a lanzarlo.</p></section>
         </>}
 
         {currentModule && <><section className="page-intro"><p className="eyebrow">MÓDULO / {currentModule.title.toUpperCase()}</p><h1>{currentModule.title}<span className="intro-icon">{currentModule.icon}</span></h1><p>{currentModule.subtitle}. Elige el problema que se parece al tuyo.</p></section><div className="problem-list">{currentModule.items.map(item => <button key={item.kind} className={`problem-card ${selected === item.kind ? 'chosen' : ''}`} onClick={() => select(item.kind)}><span>{item.icon}</span><div><h3>{item.title}</h3><p>{item.description}</p></div><b>↗</b></button>)}</div></>}
@@ -265,7 +301,7 @@ export default function App() {
 
         {page === 'history' && <><section className="page-intro"><p className="eyebrow">REGISTRO LOCAL</p><h1>Historial</h1><p>Los resultados y reportes permanecen en este equipo.</p></section><div className="history-list">{history.length ? history.map(entry => <button key={entry.id} onClick={() => request<Task>(`/tasks/${entry.id}`, token).then(t => { setTask(t); setSelected(t.kind) }).catch(e => setError(e.message))}><span>{new Date(entry.created).toLocaleString('es')}</span><strong>{labelKind(entry.kind)}</strong><small>{entry.status}</small><b>Ver →</b></button>) : <div className="empty">Todavía no hay diagnósticos guardados.</div>}</div></>}
 
-        {page === 'tech' && <><section className="page-intro"><p className="eyebrow">ACCESO AVANZADO</p><h1>Herramientas del técnico</h1><p>La contraseña es local. El acceso vence tras 15 minutos de inactividad. Los scripts se ejecutan con tu usuario, nunca con privilegios administrativos.</p></section><div className="tech-card"><h3>{techConfigured ? 'Desbloquear modo técnico' : 'Crear contraseña técnica'}</h3><div className="inline-form"><label htmlFor="tech-password">Contraseña (mínimo 10 caracteres)</label><input id="tech-password" type="password" minLength={10} value={techPassword} onChange={e => setTechPassword(e.target.value)} /><button className="primary" disabled={!token || techPassword.length < 10} onClick={async () => { try { await post(`/technician/${techConfigured ? 'unlock' : 'password'}`, token, { password: techPassword }); setTechUnlocked(true); setTechConfigured(true); setTechPassword(''); setMessage('Modo técnico desbloqueado.') } catch (e) { setError((e as Error).message) } }}>Desbloquear</button></div></div>{techUnlocked && <div className="tech-card"><h3>Script de usuario</h3><p>Guarda una versión y ejecútala con límite de 30 segundos y memoria acotada. Revisa el código antes de ejecutarlo.</p><label htmlFor="script-name">Nombre</label><input id="script-name" pattern="[a-zA-Z0-9_-]+" value={scriptName} onChange={e => setScriptName(e.target.value)} placeholder="mi_diagnostico" /><label htmlFor="script-source">Código Python</label><textarea id="script-source" rows={9} value={scriptSource} onChange={e => setScriptSource(e.target.value)} /><div className="lab-actions"><button onClick={async () => { try { await post('/technician/scripts', token, { name: scriptName, source: scriptSource }); setMessage('Versión guardada.') } catch (e) { setError((e as Error).message) } }}>Guardar versión</button><button onClick={async () => { try { const r = await post<{ stdout: string; stderr: string; exit_code: number }>(`/technician/scripts/${encodeURIComponent(scriptName)}/run`, token); setScriptOutput(`Salida ${r.exit_code}\n${r.stdout}\n${r.stderr}`) } catch (e) { setError((e as Error).message) } }}>Ejecutar</button></div>{scriptOutput && <pre className="script-output">{scriptOutput}</pre>}</div>}</>}
+        {page === 'tech' && <><section className="page-intro"><p className="eyebrow">ACCESO AVANZADO</p><h1>Herramientas del técnico</h1><p>La contraseña es local. El acceso vence tras 15 minutos de inactividad. Los scripts se ejecutan con tu usuario, nunca con privilegios administrativos.</p></section><div className="tech-card"><h3>{techConfigured ? 'Desbloquear modo técnico' : 'Crear contraseña técnica'}</h3><div className="inline-form"><label htmlFor="tech-password">Contraseña (mínimo 10 caracteres)</label><input id="tech-password" type="password" minLength={10} value={techPassword} onChange={e => setTechPassword(e.target.value)} /><button className="primary" disabled={!token || techPassword.length < 10} onClick={async () => { try { await post(`/technician/${techConfigured ? 'unlock' : 'password'}`, token, { password: techPassword }); setTechUnlocked(true); setTechConfigured(true); setTechPassword(''); setMessage('Modo técnico desbloqueado.'); setTimeout(loadScripts, 0) } catch (e) { setError((e as Error).message) } }}>Desbloquear</button></div></div>{techUnlocked && <><div className="tech-card"><h3>Arsenal</h3><p>Los diagnósticos integrados se consultan como referencia. Los scripts personales se guardan por versiones y se ejecutan como el usuario actual.</p><div className="arsenal-list">{scripts.map(name => <button key={name} className="secondary" onClick={async () => { setScriptName(name); try { const r = await request<{ source: string }>(`/technician/scripts/${encodeURIComponent(name)}`, token); setScriptSource(r.source) } catch (e) { setError((e as Error).message) } }}>{name}</button>)}{!scripts.length && <span className="muted">Aún no hay scripts personales guardados.</span>}</div><div className="arsenal-reference"><strong>Diagnósticos integrados</strong><span>Almacenamiento · Procesos · Redes</span></div></div><div className="tech-card"><h3>Editor de script personal</h3><p>Guarda una versión y ejecútala con límite de 30 segundos y memoria acotada. Revisa el código antes de ejecutarlo.</p><label htmlFor="script-name">Nombre</label><input id="script-name" pattern="[a-zA-Z0-9_-]+" value={scriptName} onChange={e => setScriptName(e.target.value)} placeholder="mi_diagnostico" /><label htmlFor="script-source">Código Python</label><textarea id="script-source" rows={9} value={scriptSource} onChange={e => setScriptSource(e.target.value)} /><div className="lab-actions"><button onClick={async () => { try { await post('/technician/scripts', token, { name: scriptName, source: scriptSource }); await loadScripts(); setMessage('Versión guardada.') } catch (e) { setError((e as Error).message) } }}>Guardar versión</button><button onClick={async () => { try { const r = await post<{ stdout: string; stderr: string; exit_code: number }>(`/technician/scripts/${encodeURIComponent(scriptName)}/run`, token); setScriptOutput(`Salida ${r.exit_code}\n${r.stdout}\n${r.stderr}`) } catch (e) { setError((e as Error).message) } }}>Ejecutar</button></div>{scriptOutput && <pre className="script-output">{scriptOutput}</pre>}</div></>}</>}
 
         {selected && token && page !== 'tech' && <section className="diagnostic-panel" id="diagnostic"><div className="diagnostic-heading"><div><p className="eyebrow">DIAGNÓSTICO SELECCIONADO</p><h2>{labelKind(selected)}</h2></div><span className="step-badge">{task ? '02 / RESULTADO' : '01 / CONFIGURAR'}</span></div>
           {!task && <><div className="parameter-grid">{(selected === 'storage-photo' || selected === 'storage-file') && <>
@@ -284,7 +320,7 @@ export default function App() {
           </div><button className="primary" onClick={() => run()}>{selected === 'full-scan' ? 'Iniciar FULL SCAN' : 'Iniciar diagnóstico'} <span>→</span></button></>}
           {task && <><div className="task-meta"><span className={`task-status ${task.status}`}>{task.status === 'complete' ? 'COMPLETADO' : task.status === 'running' ? 'ANALIZANDO' : task.status === 'queued' ? 'EN COLA' : task.status === 'cancelled' ? 'CANCELADO' : 'INCOMPLETO'}</span><span>ID {task.id.slice(0, 8)}</span><span>{new Date(task.created).toLocaleString('es')}</span></div>
             {!terminal(task.status) && <div className="progress-block"><div className="progress-track"><progress aria-label="Progreso del diagnóstico" value={task.progress} max={100} /></div><p>El tiempo depende del equipo y de las carpetas examinadas.</p><button className="secondary" onClick={() => post(`/tasks/${task.id}/cancel`, token).catch(e => setError(e.message))}>Cancelar diagnóstico</button></div>}
-            {task.result && <><h3 className="result-summary">{task.result.summary}</h3><MetricCards measurements={task.result.measurements} /><DataList title="Mediciones" data={task.result.measurements} /><DataList title="Hallazgos" data={task.result.findings} /><Evidence task={task} token={token} onError={setError} /><DataList title="Limitaciones" data={task.result.limitations} /><DataList title="Recomendaciones" data={task.result.recommendations} /><DataList title="Resultados de reparación" data={(task.result as Result & { actions_taken?: unknown[] }).actions_taken} /></>}
+            {task.result && <><div className="view-switch" role="tablist" aria-label="Vista del resultado"><button className={resultView === 'client' ? 'active' : ''} onClick={() => setResultView('client')}>Cliente</button><button className={resultView === 'technical' ? 'active' : ''} onClick={() => setResultView('technical')}>Técnico · JSON</button></div>{resultView === 'client' ? <ClientResult task={task} /> : <><h3 className="result-summary">{task.result.summary}</h3><MetricCards measurements={task.result.measurements} /><DataList title="Mediciones" data={task.result.measurements} /><DataList title="Hallazgos" data={task.result.findings} /><Evidence task={task} token={token} onError={setError} /><DataList title="Limitaciones" data={task.result.limitations} /><DataList title="Recomendaciones" data={task.result.recommendations} /><DataList title="Resultados de reparación" data={task.result.actions_taken} /></>}</>}
             {task.error && <p className="error-text">{task.error}</p>}
             {terminal(task.status) && <div className="result-actions"><button className="primary" onClick={() => download(`/tasks/${task.id}/report`, token, `xscanner-${task.id}.txt`).catch(e => setError(e.message))}>Descargar reporte .txt ↓</button><button className="secondary" onClick={() => { setTask(null); setPrepared(null) }}>Nuevo diagnóstico</button></div>}
             {task.status === 'complete' && actionItems.length > 0 && <div className="action-section"><p className="eyebrow">ACCIONES DISPONIBLES</p><h3>Revisa antes de cambiar algo</h3>{actionItems.map(action => <div className="action-row" key={action.kind}><div><strong>{action.description}</strong>{action.kind === 'trash-file' && <select aria-label="Archivo para mover" value={actionTarget} onChange={e => setActionTarget(e.target.value)}><option value="">Selecciona un archivo</option>{targetFiles.map(f => f.path && <option key={f.path} value={f.path}>{f.path}</option>)}</select>}{action.kind === 'terminate-process' && <select aria-label="Proceso para cerrar" value={actionTarget} onChange={e => setActionTarget(e.target.value)}><option value="">Selecciona un proceso</option>{targetProcesses.map(p => p.pid && <option key={p.pid} value={String(p.pid)}>{p.name || 'Proceso'} · PID {p.pid}</option>)}</select>}</div><button className="secondary" onClick={() => prepareAction(action.kind, actionTarget)}>Revisar acción →</button></div>)}{actionItems.some(a => a.kind === 'terminate-process') && <button className="text-button" onClick={() => prepareAction('force-process', actionTarget)}>Preparar cierre forzado (segunda acción explícita)</button>}</div>}
@@ -293,6 +329,8 @@ export default function App() {
       </div>
     </main>
 
-    {prepared && <div className="modal-backdrop" role="presentation"><div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><p className="eyebrow">CONFIRMACIÓN REQUERIDA</p><h2 id="confirm-title">Revisa el cambio</h2><p>{prepared.description}</p><div className="modal-note"><strong>Consecuencias</strong><span>{prepared.consequences}</span></div><div className="modal-note"><strong>Recuperación</strong><span>{prepared.recovery}</span></div><div className="modal-actions"><button className="secondary" onClick={() => setPrepared(null)}>Cancelar</button><button className="primary" onClick={executeAction}>Confirmar y ejecutar</button></div></div></div>}
+    {prepared && <div className="modal-backdrop" role="presentation"><div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><p className="eyebrow">CONFIRMACIÓN REQUERIDA</p><h2 id="confirm-title">Revisa el cambio</h2><p>{prepared.description}</p><div className="modal-note"><strong>Consecuencias</strong><span>{prepared.consequences}</span></div><div className="modal-note"><strong>Recuperación</strong><span>{prepared.recovery}</span></div><div className="modal-actions"><button className="secondary" disabled={actionState === 'working'} onClick={() => setPrepared(null)}>Cancelar</button><button className="primary" disabled={actionState === 'working'} onClick={executeAction}>Confirmar y ejecutar</button></div></div></div>}
+    {actionState === 'working' && <div className="modal-backdrop" role="status"><div className="modal working-modal"><div className="spinner"></div><h2>Trabajando en ello...</h2><p>Estamos aplicando la acción y verificando la respuesta del sistema.</p></div></div>}
+    {actionState === 'success' && <div className="modal-backdrop"><div className="modal success-modal" role="dialog" aria-modal="true"><div className="success-check">✓</div><h2>Acción confirmada</h2><p>La operación terminó correctamente.</p><button className="primary" onClick={() => setActionState('idle')}>Aceptar</button></div></div>}
   </div>
 }

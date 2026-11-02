@@ -108,6 +108,24 @@ def walk_files(root: Path, cancel: Event, limit: int = 20_000, denied: list[str]
             continue
 
 
+def user_scan_roots() -> list[Path]:
+    """Return visible user folders, never virtual system trees."""
+    candidates = [HOME / name for name in ("Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music")]
+    candidates.extend([Path(value).expanduser() for key, value in os.environ.items() if key.startswith("XDG_") and key.endswith("_DIR")])
+    candidates.append(HOME)
+    roots = []
+    seen = set()
+    for path in candidates:
+        try:
+            path = path.resolve()
+        except OSError:
+            continue
+        if path.is_dir() and path not in seen and (path == HOME or path.is_relative_to(HOME)):
+            seen.add(path)
+            roots.append(path)
+    return roots
+
+
 def storage_space(params: dict, cancel: Event) -> dict:
     r = result("Capacidad de los sistemas locales montados y archivos grandes del usuario")
     for part in local_mounts():
@@ -125,11 +143,12 @@ def storage_space(params: dict, cancel: Event) -> dict:
     big = []
     denied = []
     folders = defaultdict(int)
-    for path, st in walk_files(HOME, cancel, 20_000, denied):
-        if path != HOME:
-            folders[path.relative_to(HOME).parts[0]] += st.st_size
-        if st.st_size >= 16 * 1024 * 1024:
-            big.append({"path": str(path), "bytes": st.st_size})
+    for root in user_scan_roots():
+        for path, st in walk_files(root, cancel, 20_000, denied):
+            if path != HOME:
+                folders[path.relative_to(HOME).parts[0]] += st.st_size
+            if st.st_size >= 16 * 1024 * 1024:
+                big.append({"path": str(path), "name": path.name, "bytes": st.st_size})
     r["evidence"] = sorted(big, key=lambda item: -item["bytes"])[:30]
     r["measurements"].append({"largest_home_folders_bytes": dict(sorted(folders.items(), key=lambda x: -x[1])[:10])})
     r["limitations"].extend(f"Ruta inaccesible: {path}" for path in denied)
@@ -145,9 +164,10 @@ def storage_space(params: dict, cancel: Event) -> dict:
     r["recommendations"].append("Mover a la papelera no libera espacio en el mismo disco hasta vaciarla por separado.")
     if params.get("duplicates"):
         groups = defaultdict(list)
-        for path, st in walk_files(HOME, cancel, 20_000):
-            if 0 < st.st_size <= 2 * 1024 * 1024 * 1024:
-                groups[st.st_size].append((path, st))
+        for root in user_scan_roots():
+            for path, st in walk_files(root, cancel, 20_000):
+                if 0 < st.st_size <= 2 * 1024 * 1024 * 1024:
+                    groups[st.st_size].append((path, st))
         duplicate_groups = []
         for candidates in groups.values():
             if len(candidates) < 2:

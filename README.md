@@ -14,3 +14,5 @@ La página no recibe la contraseña de Linux. Los archivos personales, resultado
 La especificación y el estado de verificación están en [PLAN.md](PLAN.md) y [plan.md](plan.md). Contrato: [docs/API.md](docs/API.md). Pruebas: [docs/TESTING.md](docs/TESTING.md).
 
 Para publicar desde GitHub en Netlify y configurar la URL real del sitio en el complemento, sigue la sección **Despliegue desde GitHub y dirección del sitio** de [docs/INSTALL.md](docs/INSTALL.md).
+
+La presentación offline está en [docs/presentacion-xscanner.html](docs/presentacion-xscanner.html), el sistema visual en [estilos.md](estilos.md) y el informe final en [docs/Informe_Final_XScanner.docx](docs/Informe_Final_XScanner.docx).

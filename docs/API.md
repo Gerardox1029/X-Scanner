@@ -21,6 +21,8 @@ Versión 1 del contrato para `http://127.0.0.1:8765`. La especificación generad
 
 `kind` de diagnóstico: `storage-space`, `storage-photo`, `storage-file`, `process-slow`, `process-frozen`, `process-heat`, `network-offline`, `network-slow`, `network-page`, `full-scan`, `strange-case`.
 
+El modo Cliente es una transformación visual del mismo resultado JSON; el modo Técnico muestra las estructuras completas. Los scripts personales se consultan con `GET /technician/scripts/{name}` y se clasifican como `usuario`; los diagnósticos integrados no se pueden editar desde la API.
+
 Las tareas tienen `id`, `kind`, `params`, `status` (`queued`, `running`, `complete`, `cancelled`, `failed`), `progress`, `created`, `finished`, `result` y `error`. Un resultado contiene `summary`, `measurements`, `findings`, `evidence`, `limitations`, `recommendations`, `actions` y, después de una acción, `actions_taken`. Las mediciones incluyen unidades en sus nombres (`_bytes`, `_seconds`, `_celsius`, etc.).
 
 Las acciones incorporadas son `trash-file`, `empty-trash`, `clear-cache`, `terminate-process`, `force-process`, `reconnect-network` y `restart-lab-server`. Ningún endpoint acepta texto de comando, argumentos de shell o una ruta para el ejecutor administrativo. Los scripts técnicos se guardan como versiones y se ejecutan con el usuario de la sesión, con límites de CPU, memoria y tiempo.
