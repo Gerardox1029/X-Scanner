@@ -3,6 +3,7 @@ import { download, localFetch, post, request, type DiagnosticKind, type Prepared
 
 type Page = 'home' | 'storage' | 'process' | 'network' | 'labs' | 'history' | 'tech'
 type ResultView = 'client' | 'technical'
+type CatalogEntry = { id: string; module: string; type: string; source: string; read_only?: boolean }
 type Item = { kind: DiagnosticKind; title: string; description: string; icon: string }
 type FileEvidence = { path?: string; name?: string; bytes?: number; modified?: string; captured?: string; date_used?: string; pid?: number; created?: number; status?: string; rss_bytes?: number }
 
@@ -148,6 +149,11 @@ export default function App() {
   const [resultView, setResultView] = useState<ResultView>('client')
   const [actionState, setActionState] = useState<'idle' | 'working' | 'success'>('idle')
   const [scripts, setScripts] = useState<string[]>([])
+  const [catalog, setCatalog] = useState<CatalogEntry[]>([])
+  const [catalogItem, setCatalogItem] = useState<CatalogEntry | null>(null)
+  const [catalogSource, setCatalogSource] = useState('')
+  const [catalogModule, setCatalogModule] = useState('storage')
+  const [catalogName, setCatalogName] = useState('')
 
   async function checkHealth() {
     request<{ service: string; api_version: number }>('/health').then(r => {
@@ -260,6 +266,12 @@ export default function App() {
     try { setScripts(await request<string[]>('/technician/scripts', token)) } catch (e) { setError((e as Error).message) }
   }
 
+  useEffect(() => {
+    if (!token || !techUnlocked || page !== 'tech') return
+    request<CatalogEntry[]>('/technician/catalog', token).then(setCatalog).catch(e => setError(e.message))
+    request<string[]>('/technician/scripts', token).then(setScripts).catch(e => setError(e.message))
+  }, [page, token, techUnlocked])
+
   const currentModule = page === 'storage' || page === 'process' || page === 'network' ? modules[page] : null
   const actionItems = task?.result?.actions || []
   const targetFiles = (task?.result?.evidence || []).filter((v): v is FileEvidence => typeof v === 'object' && v !== null && 'path' in v)
@@ -302,6 +314,8 @@ export default function App() {
         {page === 'history' && <><section className="page-intro"><p className="eyebrow">REGISTRO LOCAL</p><h1>Historial</h1><p>Los resultados y reportes permanecen en este equipo.</p></section><div className="history-list">{history.length ? history.map(entry => <button key={entry.id} onClick={() => request<Task>(`/tasks/${entry.id}`, token).then(t => { setTask(t); setSelected(t.kind) }).catch(e => setError(e.message))}><span>{new Date(entry.created).toLocaleString('es')}</span><strong>{labelKind(entry.kind)}</strong><small>{entry.status}</small><b>Ver →</b></button>) : <div className="empty">Todavía no hay diagnósticos guardados.</div>}</div></>}
 
         {page === 'tech' && <><section className="page-intro"><p className="eyebrow">ACCESO AVANZADO</p><h1>Herramientas del técnico</h1><p>La contraseña es local. El acceso vence tras 15 minutos de inactividad. Los scripts se ejecutan con tu usuario, nunca con privilegios administrativos.</p></section><div className="tech-card"><h3>{techConfigured ? 'Desbloquear modo técnico' : 'Crear contraseña técnica'}</h3><div className="inline-form"><label htmlFor="tech-password">Contraseña (mínimo 10 caracteres)</label><input id="tech-password" type="password" minLength={10} value={techPassword} onChange={e => setTechPassword(e.target.value)} /><button className="primary" disabled={!token || techPassword.length < 10} onClick={async () => { try { await post(`/technician/${techConfigured ? 'unlock' : 'password'}`, token, { password: techPassword }); setTechUnlocked(true); setTechConfigured(true); setTechPassword(''); setMessage('Modo técnico desbloqueado.'); setTimeout(loadScripts, 0) } catch (e) { setError((e as Error).message) } }}>Desbloquear</button></div></div>{techUnlocked && <><div className="tech-card"><h3>Arsenal</h3><p>Los diagnósticos integrados se consultan como referencia. Los scripts personales se guardan por versiones y se ejecutan como el usuario actual.</p><div className="arsenal-list">{scripts.map(name => <button key={name} className="secondary" onClick={async () => { setScriptName(name); try { const r = await request<{ source: string }>(`/technician/scripts/${encodeURIComponent(name)}`, token); setScriptSource(r.source) } catch (e) { setError((e as Error).message) } }}>{name}</button>)}{!scripts.length && <span className="muted">Aún no hay scripts personales guardados.</span>}</div><div className="arsenal-reference"><strong>Diagnósticos integrados</strong><span>Almacenamiento · Procesos · Redes</span></div></div><div className="tech-card"><h3>Editor de script personal</h3><p>Guarda una versión y ejecútala con límite de 30 segundos y memoria acotada. Revisa el código antes de ejecutarlo.</p><label htmlFor="script-name">Nombre</label><input id="script-name" pattern="[a-zA-Z0-9_-]+" value={scriptName} onChange={e => setScriptName(e.target.value)} placeholder="mi_diagnostico" /><label htmlFor="script-source">Código Python</label><textarea id="script-source" rows={9} value={scriptSource} onChange={e => setScriptSource(e.target.value)} /><div className="lab-actions"><button onClick={async () => { try { await post('/technician/scripts', token, { name: scriptName, source: scriptSource }); await loadScripts(); setMessage('Versión guardada.') } catch (e) { setError((e as Error).message) } }}>Guardar versión</button><button onClick={async () => { try { const r = await post<{ stdout: string; stderr: string; exit_code: number }>(`/technician/scripts/${encodeURIComponent(scriptName)}/run`, token); setScriptOutput(`Salida ${r.exit_code}\n${r.stdout}\n${r.stderr}`) } catch (e) { setError((e as Error).message) } }}>Ejecutar</button></div>{scriptOutput && <pre className="script-output">{scriptOutput}</pre>}</div></>}</>}
+
+        {page === 'tech' && techUnlocked && <section className="tech-card" aria-labelledby="catalog-title"><h3 id="catalog-title">Arsenal por módulo</h3><p>Selecciona el código real de un diagnóstico o solución. Puedes editar y guardar una copia personal para pruebas. Los diagnósticos y acciones integrados siguen usando el código instalado.</p><div className="view-switch">{(['storage','process','network'] as const).map(module => <button key={module} className={catalogModule === module ? 'active' : ''} onClick={() => setCatalogModule(module)}>{module === 'storage' ? 'Almacenamiento' : module === 'process' ? 'Procesos' : 'Redes'}</button>)}</div><div className="arsenal-list">{catalog.filter(item => item.module === catalogModule).map(item => <button className="secondary" key={item.type + item.id} onClick={() => { setCatalogItem(item); setCatalogSource(item.source); setCatalogName(`copia_${item.id.replaceAll('-', '_')}`) }}>{item.type === 'diagnostic' ? 'Diagnóstico' : 'Solución'} · {item.id}</button>)}</div>{catalogItem && <div><h4>{catalogItem.id}</h4><label>Nombre de tu versión<input value={catalogName} onChange={e => setCatalogName(e.target.value)} /></label><textarea className="catalog-source" aria-label="Código del módulo seleccionado" rows={14} value={catalogSource} onChange={e => setCatalogSource(e.target.value)} /><button className="secondary" disabled={!/^[a-zA-Z0-9_-]{1,40}$/.test(catalogName)} onClick={async () => { try { await post('/technician/scripts', token, { name: catalogName, source: catalogSource, module: catalogItem.module }); await loadScripts(); setMessage('Versión personal guardada en Arsenal.') } catch (e) { setError((e as Error).message) } }}>Guardar versión personal</button></div>}</section>}
 
         {selected && token && page !== 'tech' && <section className="diagnostic-panel" id="diagnostic"><div className="diagnostic-heading"><div><p className="eyebrow">DIAGNÓSTICO SELECCIONADO</p><h2>{labelKind(selected)}</h2></div><span className="step-badge">{task ? '02 / RESULTADO' : '01 / CONFIGURAR'}</span></div>
           {!task && <><div className="parameter-grid">{(selected === 'storage-photo' || selected === 'storage-file') && <>

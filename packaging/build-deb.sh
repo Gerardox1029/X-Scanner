@@ -9,10 +9,11 @@ OUTPUT="$ROOT/dist"
 
 test -x "$VENV/bin/pip" || { echo "Crea .venv e instala agent/pyproject.toml primero" >&2; exit 1; }
 mkdir -p "$WHEELS" "$OUTPUT"
-"$VENV/bin/pip" download --dest "$WHEELS" --requirement "$ROOT/agent/requirements.lock"
+"$VENV/bin/pip" download --no-index --find-links "$WHEELS" --dest "$WHEELS" --requirement "$ROOT/agent/requirements.lock" || \
+  "$VENV/bin/pip" download --dest "$WHEELS" --requirement "$ROOT/agent/requirements.lock"
 rm -f "$WHEELS"/xscanner_agent-*.whl
 rm -rf "$ROOT/agent/build"
-"$VENV/bin/pip" wheel --no-deps --wheel-dir "$WHEELS" "$ROOT/agent"
+"$VENV/bin/pip" wheel --no-build-isolation --no-deps --wheel-dir "$WHEELS" "$ROOT/agent"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/DEBIAN" "$STAGE/usr/lib/xscanner/wheels" "$STAGE/usr/share/polkit-1/actions" "$STAGE/usr/share/applications" "$STAGE/usr/bin"
 cp "$WHEELS"/*.whl "$STAGE/usr/lib/xscanner/wheels/"

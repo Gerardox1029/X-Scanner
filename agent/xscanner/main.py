@@ -1,5 +1,6 @@
 import json
 import io
+import inspect
 import os
 import platform
 import re
@@ -49,6 +50,7 @@ class PasswordInput(BaseModel):
 class ScriptInput(BaseModel):
     name: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,40}$")
     source: str = Field(min_length=1, max_length=20_000)
+    module: str = Field(default="general", pattern=r"^(general|storage|process|network)$")
 
 
 class TaskStore:
@@ -296,6 +298,27 @@ def create_app() -> FastAPI:
         folder.mkdir(mode=0o700, exist_ok=True)
         return sorted(p.stem for p in folder.glob("*.py") if re.fullmatch(r"[a-zA-Z0-9_-]{1,40}", p.stem))
 
+    @app.get("/api/v1/technician/catalog", dependencies=[Depends(tech)])
+    def catalog():
+        entries = []
+        for kind, function in diagnostics.FUNCTIONS.items():
+            module = kind.split("-", 1)[0]
+            if module == "strange":
+                module = "storage"
+            if kind in {"storage-photo", "storage-file"}:
+                function = diagnostics.search_files
+            try:
+                source = inspect.getsource(function)
+            except (OSError, TypeError):
+                source = "# Este diagnóstico utiliza una función delegada; consulta diagnostics.py."
+            entries.append({"id": kind, "module": module, "type": "diagnostic", "source": source})
+        for kind, module in (("trash-file", "storage"), ("empty-trash", "storage"), ("clear-cache", "storage"),
+                             ("terminate-process", "process"), ("force-process", "process"),
+                             ("reconnect-network", "network"), ("restart-lab-server", "network")):
+            entries.append({"id": kind, "module": module, "type": "solution",
+                            "source": inspect.getsource(Actions._target) + "\n" + inspect.getsource(Actions.execute), "read_only": True})
+        return entries
+
     @app.get("/api/v1/technician/scripts/{name}", dependencies=[Depends(tech)])
     def read_script(name: str):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,40}", name):
@@ -303,7 +326,12 @@ def create_app() -> FastAPI:
         path = DATA_DIR / "scripts" / f"{name}.py"
         if not path.is_file():
             raise HTTPException(404, "Script no encontrado")
-        return {"name": name, "category": "usuario", "source": path.read_text()}
+        meta = path.with_suffix(".json")
+        try:
+            module = json.loads(meta.read_text()).get("module", "general")
+        except (OSError, ValueError):
+            module = "general"
+        return {"name": name, "module": module, "source": path.read_text()}
 
     @app.post("/api/v1/technician/scripts", dependencies=[Depends(tech)])
     def save_script(body: ScriptInput):
@@ -318,7 +346,10 @@ def create_app() -> FastAPI:
             version.chmod(0o600)
         path.write_text(body.source)
         path.chmod(0o600)
-        return {"name": body.name, "saved": True}
+        meta = path.with_suffix(".json")
+        meta.write_text(json.dumps({"module": body.module}))
+        meta.chmod(0o600)
+        return {"name": body.name, "module": body.module, "saved": True}
 
     @app.post("/api/v1/technician/scripts/{name}/run", dependencies=[Depends(tech)])
     def run_script(name: str):

@@ -109,10 +109,20 @@ def walk_files(root: Path, cancel: Event, limit: int = 20_000, denied: list[str]
 
 
 def user_scan_roots() -> list[Path]:
-    """Return visible user folders, never virtual system trees."""
-    candidates = [HOME / name for name in ("Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music")]
-    candidates.extend([Path(value).expanduser() for key, value in os.environ.items() if key.startswith("XDG_") and key.endswith("_DIR")])
-    candidates.append(HOME)
+    """Discover the folders shown by the desktop file manager."""
+    candidates = []
+    config = Path(os.environ.get("XDG_CONFIG_HOME", str(HOME / ".config"))) / "user-dirs.dirs"
+    try:
+        for line in config.read_text().splitlines():
+            match = re.match(r'^XDG_(?:DESKTOP|DOWNLOAD|DOCUMENTS|PICTURES|VIDEOS|MUSIC|TEMPLATES|PUBLICSHARE)_DIR="([^"]+)"', line)
+            if match:
+                candidates.append(Path(match.group(1).replace("$HOME", str(HOME), 1)))
+    except OSError:
+        pass
+    candidates.extend(HOME / name for name in ("Desktop", "Documents", "Downloads", "Pictures", "Videos", "Music", "Escritorio", "Documentos", "Descargas", "Imágenes", "Vídeos", "Música"))
+    candidates.extend(Path(value).expanduser() for key, value in os.environ.items() if key.startswith("XDG_") and key.endswith("_DIR"))
+    if not any(path.is_dir() for path in candidates):
+        candidates.append(HOME)
     roots = []
     seen = set()
     for path in candidates:
@@ -127,23 +137,29 @@ def user_scan_roots() -> list[Path]:
 
 
 def storage_space(params: dict, cancel: Event) -> dict:
-    r = result("Capacidad de los sistemas locales montados y archivos grandes del usuario")
-    for part in local_mounts():
+    r = result("Capacidad del disco personal y archivos grandes en carpetas del usuario")
+    home_device = HOME.stat().st_dev
+    personal_mounts = [part for part in local_mounts() if os.stat(part.mountpoint).st_dev == home_device]
+    if not personal_mounts:
+        personal_mounts = [type("Volume", (), {"mountpoint": str(HOME)})()]
+    for part in personal_mounts[:1]:
         check(cancel)
         try:
             usage = psutil.disk_usage(part.mountpoint)
             st = os.statvfs(part.mountpoint)
-            r["measurements"].append({"volume": part.mountpoint, "used_bytes": usage.used,
+            r["measurements"].append({"volume": str(HOME), "filesystem_mountpoint": part.mountpoint, "used_bytes": usage.used,
                 "free_bytes": usage.free, "percent": usage.percent, "inodes_free": st.f_favail,
                 "inodes_total": st.f_files})
             if usage.percent >= 90:
-                r["findings"].append(f"{part.mountpoint}: {usage.percent:.1f}% ocupado")
+                r["findings"].append(f"Disco de tu carpeta personal: {usage.percent:.1f}% ocupado")
         except (OSError, PermissionError) as exc:
             r["limitations"].append(f"{part.mountpoint}: {exc}")
     big = []
     denied = []
     folders = defaultdict(int)
-    for root in user_scan_roots():
+    roots = user_scan_roots()
+    r["measurements"].append({"personal_folders": [str(root) for root in roots]})
+    for root in roots:
         for path, st in walk_files(root, cancel, 20_000, denied):
             if path != HOME:
                 folders[path.relative_to(HOME).parts[0]] += st.st_size
@@ -152,7 +168,7 @@ def storage_space(params: dict, cancel: Event) -> dict:
     r["evidence"] = sorted(big, key=lambda item: -item["bytes"])[:30]
     r["measurements"].append({"largest_home_folders_bytes": dict(sorted(folders.items(), key=lambda x: -x[1])[:10])})
     r["limitations"].extend(f"Ruta inaccesible: {path}" for path in denied)
-    r["limitations"].append("La búsqueda de archivos grandes examina hasta 20 000 archivos del usuario; las rutas inaccesibles se omiten.")
+    r["limitations"].append("Se revisan carpetas personales detectadas por XDG, hasta 20 000 archivos por carpeta; las rutas inaccesibles se omiten.")
     trash = HOME / ".local/share/Trash/files"
     if trash.exists():
         r["measurements"].append({"trash_items": sum(1 for _ in trash.iterdir())})

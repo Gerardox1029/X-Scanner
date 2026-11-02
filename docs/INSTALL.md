@@ -47,6 +47,8 @@ Si la primera instancia sigue abierta, ciérrala con Ctrl-C en su terminal o des
 
 En la web, el resultado aparece primero en modo Cliente. Cambia a “Técnico · JSON” para revisar mediciones completas. Herramientas del técnico incluye Arsenal para scripts personales guardados en `~/.local/share/xscanner/scripts/`.
 
+Arsenal muestra por módulo el código real de diagnósticos y soluciones. Al guardar una edición se crea una versión personal con permisos de usuario. Los diagnósticos y acciones integrados continúan usando el código instalado; para cambiar ese comportamiento en todos los clientes, actualiza el paquete y vuelve a instalarlo.
+
 ## Datos y restauración
 
 - Configuración: `${XDG_CONFIG_HOME:-~/.config}/xscanner/settings.json`.
